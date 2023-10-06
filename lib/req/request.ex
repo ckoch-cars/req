@@ -1009,11 +1009,6 @@ defmodule Req.Request do
     steps = request.response_steps
 
     Enum.reduce_while(steps, {request, response}, fn step, {request, response} ->
-      # [:req, :run_response]
-      # |> :telemetry.span(%{step: step} fn ->
-      #   run_step(step, {request, response})
-      # end)
-
       case run_step(step, {request, response}) do
         {%Req.Request{halted: true} = request, response_or_exception} ->
           {:halt, {request, response_or_exception}}
