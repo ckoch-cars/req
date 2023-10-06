@@ -476,7 +476,7 @@ defmodule Req.Request do
       iex> Req.Request.get_option_lazy(req, :b, fun)
       42
   """
-  @spec get_option_lazy(t(), atom(), (-> term())) :: term()
+  @spec get_option_lazy(t(), atom(), (() -> term())) :: term()
   def get_option_lazy(request, key, fun) when is_function(fun, 0) do
     Map.get_lazy(request.options, key, fun)
   end
@@ -971,6 +971,7 @@ defmodule Req.Request do
 
   def run_request(%{current_request_steps: [step_key | rest]} = request) do
     step = Keyword.fetch!(request.request_steps, step_key)
+
     [:req, :request_steps]
     |> :telemetry.span(%{step: step_key}, fn ->
       {step.(request), %{step: step_key}}
@@ -1043,7 +1044,8 @@ defmodule Req.Request do
     end)
   end
 
-  defp run_step({name, step}, state, stage \\ :response_steps) when is_atom(name) and is_function(step, 1) do
+  defp run_step({name, step}, state, stage \\ :response_steps)
+       when is_atom(name) and is_function(step, 1) do
     :telemetry.span([:req, stage], %{step: name}, fn ->
       {step.(state), %{step: name}}
     end)

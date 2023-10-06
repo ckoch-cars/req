@@ -59,7 +59,11 @@ defmodule Req.RequestTest do
   end
 
   test "request steps emit telemtry events", c do
-    ref = :telemetry_test.attach_event_handlers(self(), [[:req, :request_steps, :start], [:req, :request_steps, :stop]])
+    ref =
+      :telemetry_test.attach_event_handlers(self(), [
+        [:req, :request_steps, :start],
+        [:req, :request_steps, :stop]
+      ])
 
     request =
       new(url: c.url <> "/ok")
@@ -77,12 +81,11 @@ defmodule Req.RequestTest do
     assert {:ok, %{status: 200, body: "from cache - updated"}} = Req.Request.run(request)
 
     assert_received {[:req, :request_steps, :start], ^ref, _timestamps, %{step: :foo}}
-    assert_received {[:req, :request_steps, :stop], ^ref, %{ duration: duration}, meta}
+    assert_received {[:req, :request_steps, :stop], ^ref, %{duration: duration}, meta}
 
     assert %{step: :foo, telemetry_span_context: _} = meta
     assert duration > 0
   end
-
 
   test "request step returns exception", c do
     request =
@@ -102,7 +105,11 @@ defmodule Req.RequestTest do
   end
 
   test "request step returns exception, emits error_steps telemtry", c do
-    ref = :telemetry_test.attach_event_handlers(self(), [[:req, :error_steps, :start], [:req, :error_steps, :stop]])
+    ref =
+      :telemetry_test.attach_event_handlers(self(), [
+        [:req, :error_steps, :start],
+        [:req, :error_steps, :stop]
+      ])
 
     request =
       new(url: c.url <> "/ok")
@@ -119,7 +126,7 @@ defmodule Req.RequestTest do
 
     assert {:error, %RuntimeError{message: "oops - updated"}} = Req.Request.run(request)
     assert_received {[:req, :error_steps, :start], ^ref, _timestamps, %{step: :foo_error}}
-    assert_received {[:req, :error_steps, :stop], ^ref, %{ duration: _duration}, meta}
+    assert_received {[:req, :error_steps, :stop], ^ref, %{duration: _duration}, meta}
     assert %{step: :foo_error, telemetry_span_context: _} = meta
   end
 
@@ -170,7 +177,11 @@ defmodule Req.RequestTest do
   end
 
   test "response steps emit telemtry", c do
-    ref = :telemetry_test.attach_event_handlers(self(), [[:req, :response_steps, :start], [:req, :response_steps, :stop]])
+    ref =
+      :telemetry_test.attach_event_handlers(self(), [
+        [:req, :response_steps, :start],
+        [:req, :response_steps, :stop]
+      ])
 
     Bypass.expect(c.bypass, "GET", "/ok", fn conn ->
       Plug.Conn.send_resp(conn, 200, "ok")
@@ -335,7 +346,11 @@ defmodule Req.RequestTest do
   end
 
   test "prepare/1 also emits telemtry" do
-    ref = :telemetry_test.attach_event_handlers(self(), [[:req, :prepare_steps, :start], [:req, :prepare_steps, :stop]])
+    ref =
+      :telemetry_test.attach_event_handlers(self(), [
+        [:req, :prepare_steps, :start],
+        [:req, :prepare_steps, :stop]
+      ])
 
     request =
       Req.new(method: :get, base_url: "http://foo", url: "/bar", auth: {"foo", "bar"})
