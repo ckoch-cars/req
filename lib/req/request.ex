@@ -707,7 +707,7 @@ defmodule Req.Request do
 
   @doc false
   def prepare(%{request_steps: [step | steps]} = request) do
-    case run_step(step, request) do
+    case run_step(step, request, :prepare_steps) do
       %Req.Request{} = request ->
         request = %{request | request_steps: steps}
         prepare(request)
@@ -969,10 +969,13 @@ defmodule Req.Request do
   """
   def run_request(request)
 
-  def run_request(%{current_request_steps: [step | rest]} = request) do
-    step = Keyword.fetch!(request.request_steps, step)
-
-    case step.(request) do
+  def run_request(%{current_request_steps: [step_key | rest]} = request) do
+    step = Keyword.fetch!(request.request_steps, step_key)
+    [:req, :request_steps]
+    |> :telemetry.span(%{step: step_key}, fn ->
+      {step.(request), %{step: step_key}}
+    end)
+    |> case do
       %Req.Request{} = request ->
         run_request(%{request | current_request_steps: rest})
 
@@ -1005,6 +1008,11 @@ defmodule Req.Request do
     steps = request.response_steps
 
     Enum.reduce_while(steps, {request, response}, fn step, {request, response} ->
+      # [:req, :run_response]
+      # |> :telemetry.span(%{step: step} fn ->
+      #   run_step(step, {request, response})
+      # end)
+
       case run_step(step, {request, response}) do
         {%Req.Request{halted: true} = request, response_or_exception} ->
           {:halt, {request, response_or_exception}}
@@ -1022,7 +1030,7 @@ defmodule Req.Request do
     steps = request.error_steps
 
     Enum.reduce_while(steps, {request, exception}, fn step, {request, exception} ->
-      case run_step(step, {request, exception}) do
+      case run_step(step, {request, exception}, :error_steps) do
         {%Req.Request{halted: true} = request, response_or_exception} ->
           {:halt, {request, response_or_exception}}
 
@@ -1035,8 +1043,10 @@ defmodule Req.Request do
     end)
   end
 
-  defp run_step({name, step}, state) when is_atom(name) and is_function(step, 1) do
-    step.(state)
+  defp run_step({name, step}, state, stage \\ :response_steps) when is_atom(name) and is_function(step, 1) do
+    :telemetry.span([:req, stage], %{step: name}, fn ->
+      {step.(state), %{step: name}}
+    end)
   end
 
   @doc false

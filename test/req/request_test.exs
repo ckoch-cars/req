@@ -58,6 +58,32 @@ defmodule Req.RequestTest do
     assert {:ok, %{status: 200, body: "from cache - updated"}} = Req.Request.run(request)
   end
 
+  test "request steps emit telemtry events", c do
+    ref = :telemetry_test.attach_event_handlers(self(), [[:req, :request_steps, :start], [:req, :request_steps, :stop]])
+
+    request =
+      new(url: c.url <> "/ok")
+      |> Req.Request.prepend_request_steps(
+        foo: fn request ->
+          {request, %Req.Response{status: 200, body: "from cache"}}
+        end
+      )
+      |> Req.Request.prepend_response_steps(
+        foo: fn {request, response} ->
+          {request, update_in(response.body, &(&1 <> " - updated"))}
+        end
+      )
+
+    assert {:ok, %{status: 200, body: "from cache - updated"}} = Req.Request.run(request)
+
+    assert_received {[:req, :request_steps, :start], ^ref, _timestamps, %{step: :foo}}
+    assert_received {[:req, :request_steps, :stop], ^ref, %{ duration: duration}, meta}
+
+    assert %{step: :foo, telemetry_span_context: _} = meta
+    assert duration > 0
+  end
+
+
   test "request step returns exception", c do
     request =
       new(url: c.url <> "/ok")
@@ -73,6 +99,28 @@ defmodule Req.RequestTest do
       )
 
     assert {:error, %RuntimeError{message: "oops - updated"}} = Req.Request.run(request)
+  end
+
+  test "request step returns exception, emits error_steps telemtry", c do
+    ref = :telemetry_test.attach_event_handlers(self(), [[:req, :error_steps, :start], [:req, :error_steps, :stop]])
+
+    request =
+      new(url: c.url <> "/ok")
+      |> Req.Request.prepend_request_steps(
+        foo: fn request ->
+          {request, RuntimeError.exception("oops")}
+        end
+      )
+      |> Req.Request.prepend_error_steps(
+        foo_error: fn {request, exception} ->
+          {request, update_in(exception.message, &(&1 <> " - updated"))}
+        end
+      )
+
+    assert {:error, %RuntimeError{message: "oops - updated"}} = Req.Request.run(request)
+    assert_received {[:req, :error_steps, :start], ^ref, _timestamps, %{step: :foo_error}}
+    assert_received {[:req, :error_steps, :stop], ^ref, %{ duration: _duration}, meta}
+    assert %{step: :foo_error, telemetry_span_context: _} = meta
   end
 
   test "request step halts with response", c do
@@ -119,6 +167,35 @@ defmodule Req.RequestTest do
       )
 
     assert {:ok, %{status: 200, body: "ok - updated"}} = Req.Request.run(request)
+  end
+
+  test "response steps emit telemtry", c do
+    ref = :telemetry_test.attach_event_handlers(self(), [[:req, :response_steps, :start], [:req, :response_steps, :stop]])
+
+    Bypass.expect(c.bypass, "GET", "/ok", fn conn ->
+      Plug.Conn.send_resp(conn, 200, "ok")
+    end)
+
+    request =
+      new(url: c.url <> "/ok")
+      |> Req.Request.prepend_response_steps(
+        foo: fn {request, response} ->
+          {request, update_in(response.body, &(&1 <> " - updated"))}
+        end,
+        bar: fn {request, response} ->
+          {request, update_in(response.body, &(&1 <> " - bar-red"))}
+        end
+      )
+
+    assert {:ok, %{status: 200, body: "ok - updated - bar-red"}} = Req.Request.run(request)
+
+    assert_received {[:req, :response_steps, :start], ^ref, _timestamps, %{step: :foo}}
+    assert_received {[:req, :response_steps, :stop], ^ref, %{duration: _duration}, meta}
+    assert %{step: :foo, telemetry_span_context: _} = meta
+
+    assert_received {[:req, :response_steps, :start], ^ref, _timestamps, %{step: :bar}}
+    assert_received {[:req, :response_steps, :stop], ^ref, %{duration: _duration}, meta}
+    assert %{step: :bar, telemetry_span_context: _} = meta
   end
 
   test "response step returns exception", c do
@@ -255,6 +332,36 @@ defmodule Req.RequestTest do
                "authorization" => [^authorization]
              } = request.headers
     end
+  end
+
+  test "prepare/1 also emits telemtry" do
+    ref = :telemetry_test.attach_event_handlers(self(), [[:req, :prepare_steps, :start], [:req, :prepare_steps, :stop]])
+
+    request =
+      Req.new(method: :get, base_url: "http://foo", url: "/bar", auth: {"foo", "bar"})
+      |> Req.Request.prepare()
+
+    assert request.url == URI.parse("http://foo/bar")
+
+    authorization = "Basic " <> Base.encode64("foo:bar")
+
+    if Req.MixProject.legacy_headers_as_lists?() do
+      assert [
+               {"user-agent", "req/0.3.11"},
+               {"accept-encoding", "zstd, br, gzip"},
+               {"authorization", ^authorization}
+             ] = request.headers
+    else
+      assert %{
+               "user-agent" => ["req/" <> _],
+               "accept-encoding" => ["zstd, br, gzip"],
+               "authorization" => [^authorization]
+             } = request.headers
+    end
+
+    assert_received {[:req, :prepare_steps, :start], ^ref, _timestamps, _meta}
+    assert_received {[:req, :prepare_steps, :stop], ^ref, %{duration: _duration}, meta}
+    assert %{step: _prepare_step_name, telemetry_span_context: _} = meta
   end
 
   ## Helpers
